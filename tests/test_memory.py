@@ -31,24 +31,5 @@ class SessionMemoryTests(unittest.TestCase):
         copied_items[0]["quantity"] = 99
         self.assertEqual(1, memory.last_items[0]["quantity"])
 
-    def test_resolve_supported_references(self) -> None:
-        memory = SessionMemory()
-        items = [{"product_description": "Canvas Tote", "quantity": 1}]
-        memory.update(
-            {
-                "last_order_id": "O-1016",
-                "last_customer_name": "Sarah Chen",
-                "last_items": items,
-            }
-        )
-        self.assertEqual("O-1016", memory.resolve_reference("that order"))
-        self.assertEqual("O-1016", memory.resolve_reference("that"))
-        self.assertEqual("O-1016", memory.resolve_reference("now refund that"))
-        self.assertEqual("O-1016", memory.resolve_reference("return that"))
-        self.assertEqual("Sarah Chen", memory.resolve_reference("same customer"))
-        self.assertEqual(items, memory.resolve_reference("same item"))
-
-
 if __name__ == "__main__":
     unittest.main()
-

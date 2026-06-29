@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import sqlite3
 import re
+from difflib import SequenceMatcher
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date
 from typing import Iterator
 
-from retail_store.matching import resolve_sku
+from retail_store.matching import PRODUCT_ALIASES, SkuAmbiguityError, resolve_sku
 from retail_store.money import apply_percent_discount_cents, cents_to_usd
 
 
@@ -192,6 +193,17 @@ def _resolve_customer_id(
         (customer_name.strip(),),
     ).fetchall()
     if not rows:
+        candidates = connection.execute(
+            "SELECT customer_id, name FROM customers ORDER BY customer_id"
+        ).fetchall()
+        normalized = customer_name.strip().casefold()
+        close = [
+            row for row in candidates
+            if row["name"].casefold().startswith(normalized)
+            or SequenceMatcher(None, normalized, row["name"].casefold()).ratio() >= 0.8
+        ]
+        if len(close) == 1:
+            return close[0]["customer_id"]
         raise CustomerNotFoundError(f"customer not found: {customer_name!r}")
     if len(rows) > 1:
         raise CustomerAmbiguityError(f"customer name is ambiguous: {customer_name!r}")
@@ -386,9 +398,37 @@ def process_return(
         if sku is None:
             if not product_description:
                 raise ReturnError("provide sku or product_description")
-            sku = resolve_sku(
-                connection, product_description, color=color, size=size
-            )
+            try:
+                sku = resolve_sku(
+                    connection, product_description, color=color, size=size
+                )
+            except SkuAmbiguityError:
+                normalized = " ".join(
+                    re.findall(r"[a-z0-9]+", product_description.casefold())
+                )
+                product_name = next(
+                    (
+                        canonical
+                        for alias, canonical in sorted(
+                            PRODUCT_ALIASES.items(),
+                            key=lambda item: len(item[0]),
+                            reverse=True,
+                        )
+                        if f" {alias} " in f" {normalized} "
+                    ),
+                    None,
+                )
+                candidates = connection.execute(
+                    """SELECT DISTINCT ol.sku
+                       FROM order_lines ol
+                       JOIN product_variants pv ON pv.sku=ol.sku
+                       JOIN products p ON p.product_id=pv.product_id
+                       WHERE ol.order_id=? AND lower(p.name)=lower(?)""",
+                    (order_id, product_name),
+                ).fetchall()
+                if len(candidates) != 1:
+                    raise
+                sku = candidates[0]["sku"]
         else:
             variant = connection.execute(
                 "SELECT 1 FROM product_variants WHERE sku = ?", (sku,)
@@ -495,6 +535,37 @@ def create_promotion(
         raise PromotionError("percent_off must be an integer between 0 and 100")
     if scope_type not in {"product", "category"}:
         raise PromotionError("scope_type must be 'product' or 'category'")
+    normalized_scope = scope_ref.strip().casefold().replace(" ", "_")
+    if scope_type == "category":
+        product_scopes = {
+            "mug": "P-MUG", "mugs": "P-MUG",
+            "sock": "P-SOCK", "socks": "P-SOCK",
+            "hoodie": "P-HOOD", "hoodies": "P-HOOD",
+            "tee": "P-TEE", "tees": "P-TEE",
+            "classic_tee": "P-TEE", "classic_tees": "P-TEE",
+            "canvas_tote": "P-TOTE", "canvas_totes": "P-TOTE",
+        }
+        if normalized_scope in product_scopes:
+            scope_type, scope_ref = "product", product_scopes[normalized_scope]
+            normalized_scope = scope_ref.casefold()
+        scope_ref = {
+            "all": "goods",
+            "all_goods": "goods",
+            "general_goods": "goods",
+            "all_apparel": "apparel",
+        }.get(normalized_scope, scope_ref if scope_type == "product" else normalized_scope)
+    else:
+        scope_ref = {
+            "hoodie": "P-HOOD",
+            "hoodies": "P-HOOD",
+            "socks": "P-SOCK",
+            "mug": "P-MUG",
+            "mugs": "P-MUG",
+            "canvas_tote": "P-TOTE",
+            "canvas_totes": "P-TOTE",
+            "classic_tee": "P-TEE",
+            "classic_tees": "P-TEE",
+        }.get(normalized_scope, scope_ref)
     start = _iso_date(start_date)
     end = _iso_date(end_date)
     if start > end:
@@ -558,6 +629,13 @@ def reorder_low_stock(
         ).fetchall()
         results: list[dict[str, object]] = []
         for need in needs:
+            existing = connection.execute(
+                """SELECT 1 FROM purchase_orders
+                   WHERE product_id=? AND status IN ('open', 'partial') LIMIT 1""",
+                (need["product_id"],),
+            ).fetchone()
+            if existing is not None:
+                continue
             supplier = connection.execute(
                 """SELECT sc.supplier_id, s.name, sc.unit_cost_cents,
                           sc.lead_time_days

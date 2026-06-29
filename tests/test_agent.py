@@ -12,25 +12,34 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from retail_store.agent import RetailAgent, SYSTEM_PROMPT
 from retail_store.database import connect
-from retail_store.llm_client import LLMClientError, LLMDecision
+from retail_store.llm_client import LLMClientError
 from retail_store.seed import seed_database
 
 
-class FailingLLMClient:
+class ScriptedAgentClient:
     available = True
 
-    def select_tool(self, *args, **kwargs):
+    def __init__(self, calls, answer):
+        self.calls = calls
+        self.answer = answer
+        self.results = []
+
+    def run_agent(
+        self, user_text, tools, system_prompt, recent_turns, invoke_tool
+    ):
+        for name, arguments in self.calls:
+            self.results.append(invoke_tool(name, arguments))
+        return self.answer
+
+
+class FailingAgentClient:
+    available = True
+
+    def run_agent(self, *args, **kwargs):
         raise LLMClientError("simulated provider failure")
 
 
-class UnknownToolLLMClient:
-    available = True
-
-    def select_tool(self, *args, **kwargs):
-        return LLMDecision("invented_store_math", {})
-
-
-class RetailAgentFallbackTests(unittest.TestCase):
+class RetailAgentTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.database = Path(self.temp_dir.name) / "retail.db"
@@ -38,111 +47,96 @@ class RetailAgentFallbackTests(unittest.TestCase):
         self.connection = connect(self.database)
         self.key_patch = patch.dict(os.environ, {}, clear=True)
         self.key_patch.start()
-        self.agent = RetailAgent(self.connection)
 
     def tearDown(self) -> None:
         self.key_patch.stop()
         self.connection.close()
         self.temp_dir.cleanup()
 
-    def test_system_prompt_contains_business_rule_boundaries(self) -> None:
-        self.assertIn("Use tools for all store operations", SYSTEM_PROMPT)
-        self.assertIn("Never compute prices", SYSTEM_PROMPT)
+    def test_system_prompt_enforces_tool_boundaries(self) -> None:
+        self.assertIn("Use tools for every store read or mutation", SYSTEM_PROMPT)
+        self.assertIn("Never calculate or invent prices", SYSTEM_PROMPT)
         self.assertIn("Today is 2026-06-19", SYSTEM_PROMPT)
-        self.assertIn("Last month means May 2026", SYSTEM_PROMPT)
+        self.assertIn("Last month means 2026-05-01", SYSTEM_PROMPT)
 
-    def test_agent_without_api_key_rings_up_public_prompt_one(self) -> None:
-        answer = self.agent.handle_user_message(
-            "Ring up two Classic Tees, Blue Medium, and one Canvas Tote "
-            "for a walk-in paying cash, dated today."
+    def test_agent_executes_model_selected_tool(self) -> None:
+        client = ScriptedAgentClient(
+            [
+                (
+                    "ring_up_order",
+                    {
+                        "items": [
+                            {
+                                "product_description": "Canvas Tote",
+                                "quantity": 1,
+                            }
+                        ],
+                        "customer_name": None,
+                        "payment_method": "cash",
+                        "order_date": "2026-06-19",
+                        "order_discount_pct": 0,
+                    },
+                )
+            ],
+            "Order O-1016 completed. Total paid: $18.00.",
         )
-        self.assertIn("Order O-1016 completed", answer)
-        self.assertIn("Total paid: $68.00", answer)
-        self.assertEqual("O-1016", self.agent.memory.last_order_id)
-        self.assertEqual("ring_up_order", self.agent.memory.last_action)
+        agent = RetailAgent(self.connection, llm_client=client)
+        answer = agent.handle_user_message("Process a cash sale for one tote.")
+        self.assertEqual("Order O-1016 completed. Total paid: $18.00.", answer)
+        self.assertTrue(client.results[0].ok)
+        self.assertEqual("O-1016", agent.memory.last_order_id)
 
-    def test_agent_remembers_single_item_order_for_refund_followup(self) -> None:
-        order_answer = self.agent.handle_user_message(
-            "Ring up one Canvas Tote for a walk-in paying card today."
+    def test_agent_supports_multiple_tool_calls(self) -> None:
+        client = ScriptedAgentClient(
+            [
+                (
+                    "create_promotion",
+                    {
+                        "description": "Hoodies 20% off",
+                        "percent_off": 20,
+                        "scope_type": "product",
+                        "scope_ref": "P-HOOD",
+                        "start_date": "2026-06-20",
+                        "end_date": "2026-06-22",
+                    },
+                ),
+                (
+                    "ring_up_order",
+                    {
+                        "items": [
+                            {
+                                "product_description": "hoodie",
+                                "color": "Gray",
+                                "size": "Medium",
+                                "quantity": 1,
+                            }
+                        ],
+                        "order_date": "2026-06-21",
+                    },
+                ),
+            ],
+            "Promotion created and hoodie sold for $48.00.",
         )
-        self.assertIn("Order O-1016 completed", order_answer)
+        agent = RetailAgent(self.connection, llm_client=client)
+        answer = agent.handle_user_message("Create the promotion, then sell it.")
+        self.assertEqual("Promotion created and hoodie sold for $48.00.", answer)
+        self.assertEqual(["create_promotion", "ring_up_order"], [
+            result.session_updates["last_action"] for result in client.results
+        ])
 
-        return_answer = self.agent.handle_user_message("now refund that")
-        self.assertIn("Return R-2002 processed", return_answer)
-        self.assertIn("Refund: $18.00", return_answer)
-        self.assertEqual("R-2002", self.agent.memory.last_return_id)
+    def test_provider_failure_is_explicit_without_fallback(self) -> None:
+        agent = RetailAgent(self.connection, llm_client=FailingAgentClient())
+        answer = agent.handle_user_message("Sell one tote.")
+        self.assertIn("Unable to run the retail agent", answer)
+        self.assertIn("simulated provider failure", answer)
+        self.assertEqual(0, self.connection.execute(
+            "SELECT COUNT(*) FROM orders WHERE order_id='O-1016'"
+        ).fetchone()[0])
 
-    def test_agent_surfaces_medium_hoodie_ambiguity(self) -> None:
-        answer = self.agent.handle_user_message(
-            "Ring up a hoodie in medium for Sarah Chen."
-        )
-        self.assertIn("clarification", answer.casefold())
-        self.assertIn("ambiguous", answer.casefold())
-        self.assertIn("HOOD-GRY-M", answer)
-        self.assertNotIn("O-1016", answer)
-
-    def test_agent_creates_promotion_then_sells_promoted_hoodie(self) -> None:
-        promotion = self.agent.handle_user_message(
-            "Put all hoodies on 20% off from 2026-06-20 to 2026-06-22."
-        )
-        self.assertIn("Promotion PR-002 created", promotion)
-
-        sale = self.agent.handle_user_message(
-            "Ring up one Gray Medium hoodie dated 2026-06-21."
-        )
-        self.assertIn("at $48.00", sale)
-        self.assertIn("Total paid: $48.00", sale)
-
-    def test_agent_executes_compound_public_promotion_prompt(self) -> None:
-        answer = self.agent.handle_user_message(
-            "Put all hoodies on 20% off from 2026-06-20 to 2026-06-22, "
-            "then ring up one Gray Medium hoodie dated 2026-06-21 and tell "
-            "me the price."
-        )
-        self.assertIn("Promotion PR-002 created", answer)
-        self.assertIn("Order O-1016 completed", answer)
-        self.assertIn("at $48.00", answer)
-        self.assertEqual("ring_up_order", self.agent.memory.last_action)
-
-    def test_agent_formats_margin_and_stockout_analytics(self) -> None:
-        margins = self.agent.handle_user_message(
-            "What were my top five products by profit margin last month?"
-        )
-        self.assertIn("Top products by profit margin", margins)
-        self.assertIn("Classic Tee", margins)
-        self.assertIn("$420.00", margins)
-
-        risks = self.agent.handle_user_message("What's about to stock out?")
-        self.assertIn("Stockout risk", risks)
-        self.assertIn("Canvas Tote", risks)
-        self.assertIn("12.0 days of cover", risks)
-
-    def test_tool_errors_do_not_crash_agent(self) -> None:
-        answer = self.agent.handle_user_message(
-            "Ring up ten Canvas Totes for a walk-in."
-        )
-        self.assertIn("Unable to complete", answer)
-        self.assertIn("insufficient inventory", answer)
-        self.assertEqual("ring_up_order", self.agent.memory.last_action)
-
-    def test_low_confidence_message_returns_clarification(self) -> None:
-        answer = self.agent.handle_user_message("Can you help with the shop?")
-        self.assertIn("clarify", answer.casefold())
-        self.assertEqual(2, len(self.agent.memory.recent_turns))
-
-    def test_llm_failure_uses_deterministic_fallback(self) -> None:
-        agent = RetailAgent(self.connection, llm_client=FailingLLMClient())
-        answer = agent.handle_user_message(
-            "Ring up one Canvas Tote for a walk-in paying cash today."
-        )
-        self.assertIn("Order O-1016 completed", answer)
-        self.assertIn("Total paid: $18.00", answer)
-
-    def test_unknown_llm_tool_uses_deterministic_fallback(self) -> None:
-        agent = RetailAgent(self.connection, llm_client=UnknownToolLLMClient())
-        answer = agent.handle_user_message("What's about to stock out?")
-        self.assertIn("Stockout risk", answer)
-        self.assertIn("Canvas Tote", answer)
+    def test_missing_api_key_is_explicit(self) -> None:
+        agent = RetailAgent(self.connection)
+        answer = agent.handle_user_message("Sell one tote.")
+        self.assertIn("OPENAI_API_KEY is required", answer)
 
 
 if __name__ == "__main__":

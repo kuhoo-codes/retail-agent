@@ -57,6 +57,53 @@ Northwind Supply costs.
 ## `get_stockout_risk`
 
 Returns products at/below a reorder point or below 14 days of cover using May sales velocity.
+Results include the specific SKUs at or below their reorder points.
 
 - Parameters: none
 
+## `inventory_report`
+
+Reports inventory by SKU, including product totals, reorder points, reorder quantities, and days
+of cover.
+
+- Optional: `product_description` or exact `sku`
+
+## `order_details`
+
+Reads an order without mutating it, including customer, date, payment method, paid unit prices,
+quantities, SKUs, and total paid.
+
+- Required: `order_id`
+
+## `sales_report`
+
+Reports units sold, gross revenue, returned units, refunds, net revenue, COGS, and margin.
+
+- Optional: `start_date`, `end_date`, `product_description`
+- Optional: `group_by` (`product` or `category`)
+- Optional: `only_with_refunds`, `only_with_returns`
+
+## `recommend_supplier`
+
+Ranks supplier offers for a product by unit cost and then lead time. It is read-only.
+
+- Required: `product_description`
+
+## `cancel_purchase_order`
+
+Cancels an open or partially received purchase order.
+
+- Required: `po_id`
+
+## `price_quote`
+
+Returns the effective promotion-aware unit price without creating an order.
+
+- Required: `product_description`
+- Optional: `price_date`, `color`, `size`
+
+## `purchase_order_report`
+
+Reports supplier, quantities, receipt status, creation date, and lead time. It is read-only.
+
+- Parameters: none

@@ -17,6 +17,15 @@ from retail_store.services import (
     receive_purchase_order as service_receive_purchase_order,
     reorder_low_stock as service_reorder_low_stock,
 )
+from retail_store.queries import (
+    cancel_purchase_order,
+    inventory_report,
+    order_details,
+    purchase_order_report,
+    recommend_supplier,
+    sales_report,
+    price_quote,
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +164,45 @@ def _get_stockout_risk(
         return _success(data, last_action="get_stockout_risk")
     except (ValueError, TypeError, sqlite3.Error) as exc:
         return _failure("get_stockout_risk", exc)
+
+
+def _query(connection: sqlite3.Connection, action: str, function: Callable[..., Any], **arguments: Any) -> ToolResult:
+    try:
+        return _success(function(connection, **arguments), last_action=action)
+    except (ValueError, TypeError, sqlite3.Error) as exc:
+        return _failure(action, exc)
+
+
+def _inventory_report(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "inventory_report", inventory_report, **arguments)
+
+
+def _order_details(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "order_details", order_details, **arguments)
+
+
+def _sales_report(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "sales_report", sales_report, **arguments)
+
+
+def _recommend_supplier(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "recommend_supplier", recommend_supplier, **arguments)
+
+
+def _cancel_purchase_order(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "cancel_purchase_order", cancel_purchase_order, **arguments)
+
+
+def _price_quote(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "price_quote", price_quote, **arguments)
+
+
+def _purchase_order_report(
+    connection: sqlite3.Connection, **arguments: Any
+) -> ToolResult:
+    return _query(
+        connection, "purchase_order_report", purchase_order_report, **arguments
+    )
 
 
 DATE_SCHEMA = {"type": "string", "format": "date"}
@@ -362,6 +410,77 @@ GET_STOCKOUT_RISK = Tool(
     callable=_get_stockout_risk,
 )
 
+INVENTORY_REPORT = Tool(
+    name="inventory_report",
+    description="Read inventory levels by product or SKU, including reorder points and days of cover. Never use a mutating tool for an inventory question.",
+    parameters={"type": "object", "properties": {
+        "product_description": {"type": ["string", "null"]},
+        "sku": {"type": ["string", "null"]},
+    }, "additionalProperties": False},
+    callable=_inventory_report,
+)
+
+ORDER_DETAILS = Tool(
+    name="order_details",
+    description="Read an existing order, customer, receipt lines, quantities, paid unit prices, and total. This tool never returns merchandise.",
+    parameters={"type": "object", "properties": {"order_id": {"type": "string"}}, "required": ["order_id"], "additionalProperties": False},
+    callable=_order_details,
+)
+
+SALES_REPORT = Tool(
+    name="sales_report",
+    description="Read revenue, refunds, net revenue, and units sold by product for a period, optionally filtered to one product.",
+    parameters={"type": "object", "properties": {
+        "start_date": {**DATE_SCHEMA, "default": "2026-05-01"},
+        "end_date": {**DATE_SCHEMA, "default": "2026-05-31"},
+        "product_description": {"type": ["string", "null"]},
+        "group_by": {"type": "string", "enum": ["product", "category"], "default": "product"},
+        "only_with_refunds": {"type": "boolean", "default": False},
+        "only_with_returns": {"type": "boolean", "default": False},
+    }, "additionalProperties": False},
+    callable=_sales_report,
+)
+
+RECOMMEND_SUPPLIER = Tool(
+    name="recommend_supplier",
+    description="Read and rank suppliers for a product without creating a purchase order.",
+    parameters={"type": "object", "properties": {"product_description": {"type": "string"}}, "required": ["product_description"], "additionalProperties": False},
+    callable=_recommend_supplier,
+)
+
+CANCEL_PURCHASE_ORDER = Tool(
+    name="cancel_purchase_order",
+    description="Cancel an open or partially received purchase order.",
+    parameters={"type": "object", "properties": {"po_id": {"type": "string"}}, "required": ["po_id"], "additionalProperties": False},
+    callable=_cancel_purchase_order,
+)
+
+PRICE_QUOTE = Tool(
+    name="price_quote",
+    description="Read the effective unit price for a product on a date without creating a sale.",
+    parameters={"type": "object", "properties": {
+        "product_description": {"type": "string"},
+        "price_date": {**DATE_SCHEMA, "default": "2026-06-19"},
+        "color": {"type": ["string", "null"]},
+        "size": {"type": ["string", "null"]},
+    }, "required": ["product_description"], "additionalProperties": False},
+    callable=_price_quote,
+)
+
+PURCHASE_ORDER_REPORT = Tool(
+    name="purchase_order_report",
+    description=(
+        "Read purchase orders with product, supplier, quantities, status, "
+        "creation date, and lead time."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    callable=_purchase_order_report,
+)
+
 TOOLS = {
     tool.name: tool
     for tool in (
@@ -372,6 +491,13 @@ TOOLS = {
         RECEIVE_PURCHASE_ORDER,
         TOP_PRODUCTS_BY_PROFIT_MARGIN,
         GET_STOCKOUT_RISK,
+        INVENTORY_REPORT,
+        ORDER_DETAILS,
+        SALES_REPORT,
+        RECOMMEND_SUPPLIER,
+        CANCEL_PURCHASE_ORDER,
+        PRICE_QUOTE,
+        PURCHASE_ORDER_REPORT,
     )
 }
 
@@ -397,4 +523,3 @@ def invoke_tool(
             session_updates={"last_action": name},
         )
     return tool.invoke(connection, **arguments)
-

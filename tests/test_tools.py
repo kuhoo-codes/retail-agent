@@ -34,6 +34,13 @@ class ToolLayerTests(unittest.TestCase):
                 "receive_purchase_order",
                 "top_products_by_profit_margin",
                 "get_stockout_risk",
+                "inventory_report",
+                "order_details",
+                "sales_report",
+                "recommend_supplier",
+                "cancel_purchase_order",
+                "price_quote",
+                "purchase_order_report",
             },
             set(TOOLS),
         )

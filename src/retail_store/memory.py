@@ -50,22 +50,3 @@ class SessionMemory:
         if not isinstance(content, str):
             raise TypeError("turn content must be text")
         self.recent_turns.append({"role": role, "content": content})
-
-    def resolve_reference(self, text: str) -> Any:
-        """Resolve a small set of deterministic conversational references."""
-        normalized = " ".join(
-            text.casefold().replace("-", " ").strip(" .!?").split()
-        )
-        if "same customer" in normalized:
-            return self.get("last_customer_name")
-        if "same item" in normalized:
-            return self.get("last_items")
-        if (
-            "that order" in normalized
-            or "now refund that" in normalized
-            or "return that" in normalized
-            or normalized == "that"
-        ):
-            return self.get("last_order_id")
-        return None
-

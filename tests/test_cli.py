@@ -26,7 +26,9 @@ class CliTests(unittest.TestCase):
     def run_commands(self, commands: list[str]) -> tuple[int, list[str]]:
         commands_iter = iter(commands)
         output: list[str] = []
-        with patch.dict("os.environ", {}, clear=True):
+        with patch.dict("os.environ", {}, clear=True), patch(
+            "retail_store.cli.load_dotenv"
+        ):
             code = run_cli(
                 database_path=self.database,
                 data_dir=ROOT / "data",
@@ -46,50 +48,17 @@ class CliTests(unittest.TestCase):
     def test_reset_reseeds_database_and_clears_memory(self) -> None:
         code, output = self.run_commands(
             [
-                "Ring up one Canvas Tote for a walk-in paying cash today.",
                 "reset",
-                "Ring up one Canvas Tote for a walk-in paying cash today.",
                 "exit",
             ]
         )
         self.assertEqual(0, code)
-        order_answers = [line for line in output if "Order O-1016 completed" in line]
-        self.assertEqual(2, len(order_answers))
         self.assertIn("Store data and session memory reset.", output)
 
-        connection = connect(self.database)
-        try:
-            self.assertEqual(
-                16, connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
-            )
-        finally:
-            connection.close()
-
-    def test_smoke_public_order_and_stockout_answers(self) -> None:
-        code, output = self.run_commands(
-            [
-                "Ring up two Classic Tees, Blue Medium, and one Canvas Tote "
-                "for a walk-in paying cash, dated today.",
-                "What's about to stock out?",
-                "exit",
-            ]
-        )
+    def test_instruction_without_api_key_reports_configuration_error(self) -> None:
+        code, output = self.run_commands(["Sell one tote.", "quit"])
         self.assertEqual(0, code)
-        self.assertTrue(any("Total paid: $68.00" in line for line in output))
-        self.assertTrue(any("Stockout risk:" in line for line in output))
-
-    def test_multi_item_refund_followup_requests_item(self) -> None:
-        _code, output = self.run_commands(
-            [
-                "Ring up two Classic Tees, Blue Medium, and one Canvas Tote "
-                "for a walk-in paying cash, dated today.",
-                "now refund that",
-                "quit",
-            ]
-        )
-        self.assertIn(
-            "I need the item or SKU to refund from order O-1016.", output
-        )
+        self.assertTrue(any("OPENAI_API_KEY is required" in line for line in output))
 
     def test_keyboard_interrupt_exits_cleanly(self) -> None:
         output: list[str] = []

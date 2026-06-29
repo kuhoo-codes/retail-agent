@@ -160,6 +160,18 @@ def get_stockout_risk(
         if days_of_cover is not None and days_of_cover < 14:
             reasons.append("fewer_than_14_days_of_cover")
         if reasons:
+            skus_at_or_below = [
+                sku_row["sku"]
+                for sku_row in connection.execute(
+                    """SELECT i.sku
+                       FROM inventory i
+                       JOIN product_variants pv ON pv.sku=i.sku
+                       WHERE pv.product_id=?
+                         AND i.on_hand_qty <= i.reorder_point
+                       ORDER BY i.sku""",
+                    (row["product_id"],),
+                )
+            ]
             results.append(
                 {
                     "product_id": row["product_id"],
@@ -168,6 +180,7 @@ def get_stockout_risk(
                     "monthly_units": monthly_units,
                     "days_of_cover": days_of_cover,
                     "reasons": reasons,
+                    "skus_at_or_below_reorder_point": skus_at_or_below,
                 }
             )
     return results

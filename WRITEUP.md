@@ -3,9 +3,9 @@
 ## Approach summary
 
 The project uses a layered design: validated CSV seed data → normalized SQLite → deterministic
-services and analytics → structured tools → agent and terminal UI. The optional LLM is limited
-to mapping natural language to a tool and arguments. Store calculations and state changes always
-run in Python services, and a deterministic parser provides an offline fallback.
+services and analytics → structured tools → model-driven agent and terminal UI. The model
+interprets language and can execute multiple tools iteratively. Store calculations and state
+changes always run in Python services.
 
 ## Domain model
 
@@ -28,21 +28,28 @@ See [docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) for details.
 | `receive_purchase_order` | Find/create a PO, receive inventory, update status. | product, supplier, ordered/received quantities; optional date and SKU variant |
 | `top_products_by_profit_margin` | Rank products by period margin. | optional `start_date`, `end_date`, `limit` |
 | `get_stockout_risk` | Report reorder and days-of-cover risks. | none |
+| `inventory_report` | Show on-hand quantity, reorder point, and days of cover by SKU. | optional product or SKU |
+| `order_details` | Show customer, payment, lines, paid unit prices, and total. | `order_id` |
+| `sales_report` | Report units, revenue, returns, refunds, COGS, and margin. | optional period, product, grouping, and filters |
+| `recommend_supplier` | Rank supplier offers by cost and lead time. | product |
+| `cancel_purchase_order` | Cancel an open or partially received PO. | `po_id` |
+| `price_quote` | Quote a promotion-aware price without creating an order. | product; optional variant and date |
 
 Full schemas and defaults are in [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Agent design
 
-`RetailAgent` asks an isolated OpenAI-compatible client for at most a tool selection. If the API
-key is absent, the provider fails, or the model chooses an unknown tool, the deterministic parser
-is used. Tools return structured results; final receipts and reports are formatted locally.
-Compound promotion-then-sale instructions execute as two ordered deterministic actions.
+`RetailAgent` runs an iterative OpenAI-compatible tool-calling loop. Each tool result—including
+domain errors—is sent back to the model, which can clarify the request, call another tool, or
+produce the final response. Unknown tools are rejected by the agent. There is no regex intent
+router or offline natural-language fallback.
 
 ## Session memory
 
 Session memory tracks recent turns plus the last order, return, purchase order, customer, items,
 SKUs, and action. This supports references such as “that order,” “same customer,” “same item,”
-and “now refund that.” Memory lasts for one CLI session and is cleared by `reset`.
+“now refund that,” “last order,” and “last purchase order.” Memory lasts for one CLI session
+and is cleared by `reset`.
 
 ## Business rules
 
@@ -54,17 +61,15 @@ or savepoints.
 
 ## Testing strategy
 
-The suite covers seed validation, schema integrity, matching, pricing, orders, returns,
-promotions, restocking, receiving, analytics, tools, memory, parser behavior, agent fallback,
-CLI reset/error behavior, all ten public prompts end-to-end, and common hidden-prompt wording
-variations.
+The offline suite covers seed validation, schema integrity, matching, pricing, orders, returns,
+promotions, restocking, receiving, analytics, tools, memory, the iterative agent/tool boundary,
+and CLI configuration/reset behavior. Agent tests use scripted model clients and do not make
+network calls.
 
 ## Known limitations and assumptions
 
 - The assignment clock is fixed at 2026-06-19; “last month” means May 2026.
-- The fallback parser intentionally supports common retail phrasing rather than unrestricted
-  language understanding.
+- Natural-language operation requires a configured OpenAI-compatible model.
 - Ambiguous product variants require clarification; the system does not guess a color or size.
 - Multi-variant purchase-order receiving requires an SKU or enough color/size information.
 - Session memory is in-process and is not persisted between program runs.
-
