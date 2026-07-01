@@ -43,6 +43,15 @@ Use this exact command:
 PYTHONPATH=src python3 -m retail_store
 ```
 
+For the optional local Mac Terminal-style browser UI:
+
+```sh
+PYTHONPATH=src python3 -m retail_store.web
+```
+
+Then open `http://127.0.0.1:8000`. The browser terminal calls the same
+`RetailAgent`, tools, SQLite database, and session memory as the CLI.
+
 The database is seeded automatically if it does not exist. Natural-language instructions normally
 use `OPENAI_API_KEY`. Without it, the published assignment workflows and common read-only
 analytics questions use a narrow deterministic tool router; unsupported language returns an

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Retail Store Agent — Terminal</title>
+    <link rel="stylesheet" href="/terminal.css">
+  </head>
+  <body>
+    <main class="desktop">
+      <section class="terminal-window" aria-label="Retail Store Agent terminal">
+        <header class="titlebar">
+          <div class="traffic-lights" aria-hidden="true">
+            <span class="light close"></span>
+            <span class="light minimize"></span>
+            <span class="light maximize"></span>
+          </div>
+          <div class="title">
+            <span class="terminal-icon">⌘</span>
+            <span>retail-store-agent — zsh — 96×28</span>
+          </div>
+          <div class="titlebar-spacer"></div>
+        </header>
+
+        <div id="terminal" class="terminal" role="log" aria-live="polite">
+          <div class="line muted">Last login: today on ttys001</div>
+          <div class="line command">
+            <span class="prompt">retail-store-agent %</span>
+            <span> PYTHONPATH=src python3 -m retail_store</span>
+          </div>
+          <div class="output">Retail Store Agent ready. Type an instruction, or 'exit' to quit.</div>
+          <form id="prompt-form" class="input-line">
+            <label class="prompt" for="prompt-input">&gt;</label>
+            <textarea
+              id="prompt-input"
+              name="prompt"
+              rows="1"
+              autofocus
+              autocomplete="off"
+              autocapitalize="sentences"
+              spellcheck="true"
+              aria-label="Retail instruction"
+            ></textarea>
+            <span class="cursor" aria-hidden="true"></span>
+          </form>
+        </div>
+      </section>
+      <p class="hint">Enter to run · Shift+Enter for a new line · ↑/↓ for history</p>
+    </main>
+    <script src="/terminal.js"></script>
+  </body>
+</html>

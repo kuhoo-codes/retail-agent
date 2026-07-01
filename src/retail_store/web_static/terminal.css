@@ -1,0 +1,198 @@
+:root {
+  color-scheme: dark;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  background: #202124;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 78% 18%, rgba(120, 127, 147, 0.25), transparent 31%),
+    linear-gradient(145deg, #49505a 0%, #262a31 44%, #15171a 100%);
+}
+
+.desktop {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  padding: 32px;
+}
+
+.terminal-window {
+  width: min(1080px, calc(100vw - 64px));
+  height: min(720px, calc(100vh - 104px));
+  min-height: 440px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 11px;
+  background: rgba(16, 16, 18, 0.96);
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.48),
+    0 2px 7px rgba(0, 0, 0, 0.4);
+}
+
+.titlebar {
+  display: grid;
+  grid-template-columns: 90px 1fr 90px;
+  align-items: center;
+  height: 38px;
+  padding: 0 13px;
+  color: #383838;
+  background: linear-gradient(#ececec, #d7d7d7);
+  border-bottom: 1px solid #aaa;
+  font-size: 13px;
+  font-weight: 500;
+  user-select: none;
+}
+
+.traffic-lights {
+  display: flex;
+  gap: 8px;
+}
+
+.light {
+  width: 12px;
+  height: 12px;
+  border: 0.5px solid rgba(0, 0, 0, 0.16);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+}
+
+.close { background: #ff5f57; }
+.minimize { background: #febc2e; }
+.maximize { background: #28c840; }
+
+.title {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.terminal-icon {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 3px;
+  color: #f5f5f5;
+  background: #242424;
+  font-size: 11px;
+}
+
+.terminal {
+  height: calc(100% - 38px);
+  overflow: auto;
+  padding: 13px 15px 24px;
+  color: #f2f2f2;
+  background: rgba(10, 10, 12, 0.96);
+  font-family: "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.52;
+  scrollbar-color: #555 transparent;
+}
+
+.line,
+.output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output {
+  margin-bottom: 1px;
+}
+
+.muted {
+  color: #a8a8a8;
+}
+
+.command {
+  color: #f4f4f4;
+}
+
+.prompt {
+  flex: none;
+  color: #59d0ff;
+  font: inherit;
+  font-weight: 600;
+}
+
+.input-line {
+  display: flex;
+  align-items: flex-start;
+  min-height: 22px;
+  gap: 9px;
+}
+
+textarea {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  max-height: 132px;
+  margin: 0;
+  padding: 0;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  outline: 0;
+  color: #f2f2f2;
+  caret-color: #f2f2f2;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+}
+
+.input-line.busy textarea {
+  color: #a8a8a8;
+}
+
+.cursor {
+  display: none;
+}
+
+.hint {
+  margin: 14px 0 0;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 700px) {
+  .desktop {
+    display: block;
+    padding: 0;
+  }
+
+  .terminal-window {
+    width: 100vw;
+    height: 100vh;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .titlebar {
+    grid-template-columns: 72px 1fr 72px;
+  }
+
+  .title span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .terminal {
+    font-size: 13px;
+  }
+
+  .hint {
+    display: none;
+  }
+}
