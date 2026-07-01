@@ -5,6 +5,8 @@
 Retail Store Agent is an interactive command-line program for operating a small retail store.
 It loads the supplied flat CSV exports into SQLite and supports sales, returns, promotions,
 restocking, purchase-order receiving, margin reporting, and stockout-risk reporting.
+Purpose-built operational/report tools are complemented by one composable analytics query,
+so unanticipated reads can group and filter store metrics across the domain.
 
 All store math and mutations are deterministic Python code. The language and workflow layer is
 model-driven: an OpenAI-compatible model interprets requests, calls tools, inspects their
@@ -41,9 +43,10 @@ Use this exact command:
 PYTHONPATH=src python3 -m retail_store
 ```
 
-The database is seeded automatically if it does not exist. Natural-language instructions require
-`OPENAI_API_KEY`; without it the CLI remains available for `help`, `reset`, and `exit`, but store
-requests return an explicit configuration error.
+The database is seeded automatically if it does not exist. Natural-language instructions normally
+use `OPENAI_API_KEY`. Without it, the published assignment workflows and common read-only
+analytics questions use a narrow deterministic tool router; unsupported language returns an
+explicit configuration error.
 
 Interactive commands:
 
@@ -75,7 +78,8 @@ The unit suite uses scripted model clients, so it does not make network calls.
 
 ## Environment variables
 
-- `OPENAI_API_KEY` — required for natural-language store requests.
+- `OPENAI_API_KEY` — required for unrestricted model-driven requests; published assignment
+  workflows and common analytics reads have an offline deterministic fallback.
 - `RETAIL_AGENT_MODEL` — optional model override; defaults to `gpt-5.4-nano`.
 - `DEBUG=1` — optional; show tracebacks for startup and database errors.
 - `OPENAI_BASE_URL` — optional OpenAI-compatible endpoint override.
@@ -118,3 +122,12 @@ Goodbye.
 - [WRITEUP.md](WRITEUP.md) — concise implementation and design summary
 - [docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) — entities and persistence decisions
 - [docs/TOOLS.md](docs/TOOLS.md) — tool/action reference
+
+## Composable analytics
+
+`query_store_metrics` handles flexible reads such as spend by customer, sales by variant,
+revenue by category, margin by product, and payment-method breakdowns. It accepts only
+whitelisted metrics, dimensions, filters, date ranges, sorting, and limits. The model never
+writes SQL: a deterministic, parameterized query layer calculates every returned number from
+stored order lines, returns, and frozen Northwind costs. Existing convenience reports remain
+available.
