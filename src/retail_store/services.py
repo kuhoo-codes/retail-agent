@@ -535,16 +535,58 @@ def create_promotion(
         raise PromotionError("percent_off must be an integer between 0 and 100")
     if scope_type not in {"product", "category"}:
         raise PromotionError("scope_type must be 'product' or 'category'")
-    normalized_scope = scope_ref.strip().casefold().replace(" ", "_")
+    normalized_scope = scope_ref.strip().casefold().replace(" ", "_").replace("-", "_")
+    product_scopes = {
+        "p_hood": "P-HOOD",
+        "pullover_hoodie": "P-HOOD",
+        "hoodie": "P-HOOD",
+        "hoodies": "P-HOOD",
+        "p_sock": "P-SOCK",
+        "wool_sock": "P-SOCK",
+        "wool_socks": "P-SOCK",
+        "sock": "P-SOCK",
+        "socks": "P-SOCK",
+        "p_mug": "P-MUG",
+        "ceramic_mug": "P-MUG",
+        "mug": "P-MUG",
+        "mugs": "P-MUG",
+        "p_tote": "P-TOTE",
+        "canvas_tote": "P-TOTE",
+        "canvas_totes": "P-TOTE",
+        "tote": "P-TOTE",
+        "totes": "P-TOTE",
+        "bag": "P-TOTE",
+        "canvas_bag": "P-TOTE",
+        "p_tee": "P-TEE",
+        "classic_tee": "P-TEE",
+        "classic_tees": "P-TEE",
+        "tee": "P-TEE",
+        "tees": "P-TEE",
+        "t_shirt": "P-TEE",
+        "t_shirts": "P-TEE",
+    }
+    description_text = " ".join(re.findall(r"[a-z0-9]+", description.casefold()))
+    description_scope = next(
+        (
+            product_id
+            for alias, product_id in sorted(
+                product_scopes.items(), key=lambda item: len(item[0]), reverse=True
+            )
+            if f" {alias.replace('_', ' ')} " in f" {description_text} "
+        ),
+        None,
+    )
     if scope_type == "category":
-        product_scopes = {
-            "mug": "P-MUG", "mugs": "P-MUG",
-            "sock": "P-SOCK", "socks": "P-SOCK",
-            "hoodie": "P-HOOD", "hoodies": "P-HOOD",
-            "tee": "P-TEE", "tees": "P-TEE",
-            "classic_tee": "P-TEE", "classic_tees": "P-TEE",
-            "canvas_tote": "P-TOTE", "canvas_totes": "P-TOTE",
-        }
+        if description_scope is not None and normalized_scope in {
+            "all",
+            "all_goods",
+            "general_goods",
+            "all_apparel",
+            "goods",
+            "apparel",
+        }:
+            scope_type, scope_ref = "product", description_scope
+            normalized_scope = scope_ref.casefold()
         if normalized_scope in product_scopes:
             scope_type, scope_ref = "product", product_scopes[normalized_scope]
             normalized_scope = scope_ref.casefold()
@@ -555,17 +597,7 @@ def create_promotion(
             "all_apparel": "apparel",
         }.get(normalized_scope, scope_ref if scope_type == "product" else normalized_scope)
     else:
-        scope_ref = {
-            "hoodie": "P-HOOD",
-            "hoodies": "P-HOOD",
-            "socks": "P-SOCK",
-            "mug": "P-MUG",
-            "mugs": "P-MUG",
-            "canvas_tote": "P-TOTE",
-            "canvas_totes": "P-TOTE",
-            "classic_tee": "P-TEE",
-            "classic_tees": "P-TEE",
-        }.get(normalized_scope, scope_ref)
+        scope_ref = product_scopes.get(normalized_scope, scope_ref)
     start = _iso_date(start_date)
     end = _iso_date(end_date)
     if start > end:

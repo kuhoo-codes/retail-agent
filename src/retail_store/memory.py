@@ -12,8 +12,12 @@ class SessionMemory:
         "last_return_id",
         "last_purchase_order_id",
         "last_customer_name",
+        "last_payment_method",
+        "last_order_date",
         "last_items",
         "last_skus",
+        "last_promotion_id",
+        "last_purchase_order_supplier",
         "last_action",
         "conversation_summary",
         "recent_turns",
@@ -24,8 +28,12 @@ class SessionMemory:
         self.last_return_id: str | None = None
         self.last_purchase_order_id: str | None = None
         self.last_customer_name: str | None = None
+        self.last_payment_method: str | None = None
+        self.last_order_date: str | None = None
         self.last_items: list[dict[str, Any]] = []
         self.last_skus: list[str] = []
+        self.last_promotion_id: str | None = None
+        self.last_purchase_order_supplier: str | None = None
         self.last_action: str | None = None
         self.conversation_summary: str | None = None
         self.recent_turns: list[dict[str, str]] = []
@@ -43,6 +51,15 @@ class SessionMemory:
         if key not in self.FIELDS:
             return default
         return deepcopy(getattr(self, key))
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return non-empty structured memory safe to pass into the model."""
+        result: dict[str, Any] = {}
+        for key in sorted(self.FIELDS - {"recent_turns", "conversation_summary"}):
+            value = getattr(self, key)
+            if value not in (None, [], {}):
+                result[key] = deepcopy(value)
+        return result
 
     def add_turn(self, role: str, content: str) -> None:
         if role not in {"user", "assistant", "tool", "system"}:

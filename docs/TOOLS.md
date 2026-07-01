@@ -4,6 +4,27 @@ All tools return a `ToolResult` with `ok`, structured `data`, an optional `error
 `session_updates`. Expected input and domain failures are returned as `ok=false` instead of
 escaping into the agent loop.
 
+The operational and convenience-report tools below remain available. Flexible analytical reads
+should use `query_store_metrics`, which owns all SQL and accepts no SQL text.
+
+## `query_store_metrics`
+
+Composes deterministic sales metrics across whitelisted dimensions and filters.
+
+- Required: `metrics` — one or more of `revenue_gross`, `revenue_net`, `units_sold`,
+  `units_kept`, `refunds`, `refund_quantity`, `cost`, `margin`, `order_count`,
+  `avg_order_value`
+- Optional `group_by`: `product`, `product_id`, `product_name`, `category`, `sku`,
+  `variant`, `color`, `size`, `customer`, `customer_id`, `customer_name`,
+  `customer_type`, `payment_method`, `date`, `month`, `order_id`
+- Optional `filters`: product ID/name, category, SKU, color, size, customer ID/name/type,
+  payment method, or order ID
+- Optional: inclusive `date_range`, `sort_by`, `sort_dir`, `limit`, `include_totals`
+
+All names are validated against fixed allowlists and filter values are bound parameters.
+Historical paid prices, period refunds, retained units, and Northwind Supply costs are calculated
+by deterministic Python code. No model- or user-authored SQL is accepted.
+
 ## `ring_up_order`
 
 Creates an order, checks/decrements inventory, and stores promotion-adjusted line prices before

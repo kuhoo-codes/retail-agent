@@ -34,9 +34,12 @@ class ToolLayerTests(unittest.TestCase):
                 "receive_purchase_order",
                 "top_products_by_profit_margin",
                 "get_stockout_risk",
+                "query_store_metrics",
                 "inventory_report",
                 "order_details",
                 "sales_report",
+                "customer_report",
+                "order_report",
                 "recommend_supplier",
                 "cancel_purchase_order",
                 "price_quote",
@@ -145,6 +148,27 @@ class ToolLayerTests(unittest.TestCase):
         unknown = invoke_tool("does_not_exist", self.connection)
         self.assertFalse(unknown.ok)
         self.assertIn("unknown tool", unknown.error)
+
+    def test_composable_query_tool_returns_sales_by_customer(self) -> None:
+        result = TOOLS["query_store_metrics"].invoke(
+            self.connection,
+            metrics=["revenue_net"],
+            group_by=["customer"],
+            date_range={
+                "start_date": "2026-05-01",
+                "end_date": "2026-05-31",
+            },
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(5, result.data["row_count"])
+        self.assertEqual("query_store_metrics", result.session_updates["last_action"])
+
+    def test_composable_query_tool_rejects_invalid_metric(self) -> None:
+        result = TOOLS["query_store_metrics"].invoke(
+            self.connection, metrics=["fabricated_metric"]
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("unknown metric", result.error)
 
 
 if __name__ == "__main__":

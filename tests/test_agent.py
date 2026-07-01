@@ -23,10 +23,12 @@ class ScriptedAgentClient:
         self.calls = calls
         self.answer = answer
         self.results = []
+        self.session_contexts = []
 
     def run_agent(
-        self, user_text, tools, system_prompt, recent_turns, invoke_tool
+        self, user_text, tools, system_prompt, recent_turns, invoke_tool, session_context=None
     ):
+        self.session_contexts.append(session_context)
         for name, arguments in self.calls:
             self.results.append(invoke_tool(name, arguments))
         return self.answer
@@ -58,6 +60,8 @@ class RetailAgentTests(unittest.TestCase):
         self.assertIn("Never calculate or invent prices", SYSTEM_PROMPT)
         self.assertIn("Today is 2026-06-19", SYSTEM_PROMPT)
         self.assertIn("Last month means 2026-05-01", SYSTEM_PROMPT)
+        self.assertIn("use query_store_metrics", SYSTEM_PROMPT)
+        self.assertIn("Never write SQL", SYSTEM_PROMPT)
 
     def test_agent_executes_model_selected_tool(self) -> None:
         client = ScriptedAgentClient(
@@ -137,6 +141,41 @@ class RetailAgentTests(unittest.TestCase):
         agent = RetailAgent(self.connection)
         answer = agent.handle_user_message("Sell one tote.")
         self.assertIn("OPENAI_API_KEY is required", answer)
+
+    def test_missing_api_key_uses_deterministic_analytics_fallback(self) -> None:
+        agent = RetailAgent(self.connection)
+        answer = agent.handle_user_message(
+            "How much did Sarah Chen spend last month?"
+        )
+        self.assertIn("Sarah Chen", answer)
+        self.assertIn("$410.20", answer)
+        self.assertNotIn("OPENAI_API_KEY", answer)
+
+    def test_fallback_formats_sales_by_variant(self) -> None:
+        agent = RetailAgent(self.connection)
+        answer = agent.handle_user_message("Show sales by variant last month.")
+        self.assertIn("Variant", answer)
+        self.assertIn("Classic Tee / Blue / M", answer)
+        self.assertIn("$115.00", answer)
+
+    def test_structured_memory_is_passed_to_model(self) -> None:
+        client = ScriptedAgentClient([], "Order is O-1016.")
+        agent = RetailAgent(self.connection, llm_client=client)
+        agent.memory.update(
+            {
+                "last_order_id": "O-1016",
+                "last_customer_name": "Sarah Chen",
+                "last_payment_method": "card",
+                "last_order_date": "2026-06-19",
+                "last_skus": ["TOTE"],
+                "last_action": "ring_up_order",
+            }
+        )
+
+        agent.handle_user_message("Tell me the last order id.")
+
+        self.assertEqual("O-1016", client.session_contexts[0]["last_order_id"])
+        self.assertEqual("card", client.session_contexts[0]["last_payment_method"])
 
 
 if __name__ == "__main__":

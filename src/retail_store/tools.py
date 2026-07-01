@@ -10,6 +10,11 @@ from retail_store.analytics import (
 from retail_store.analytics import (
     top_products_by_profit_margin as analytics_top_products_by_profit_margin,
 )
+from retail_store.composable_query import (
+    SUPPORTED_DIMENSIONS,
+    SUPPORTED_METRICS,
+    query_store_metrics as analytics_query_store_metrics,
+)
 from retail_store.services import (
     create_order,
     create_promotion as service_create_promotion,
@@ -19,7 +24,9 @@ from retail_store.services import (
 )
 from retail_store.queries import (
     cancel_purchase_order,
+    customer_report,
     inventory_report,
+    order_report,
     order_details,
     purchase_order_report,
     recommend_supplier,
@@ -86,6 +93,8 @@ def _ring_up_order(connection: sqlite3.Connection, **arguments: Any) -> ToolResu
             data,
             last_order_id=data["order_id"],
             last_customer_name=arguments.get("customer_name") or "walk-in",
+            last_payment_method=data["payment_method"],
+            last_order_date=data["order_date"],
             last_items=input_items,
             last_skus=[line["sku"] for line in data["line_items"]],
             last_action="ring_up_order",
@@ -113,7 +122,11 @@ def _create_promotion(
 ) -> ToolResult:
     try:
         data = service_create_promotion(connection, **arguments)
-        return _success(data, last_action="create_promotion")
+        return _success(
+            data,
+            last_promotion_id=data["promo_id"],
+            last_action="create_promotion",
+        )
     except (ValueError, TypeError, sqlite3.Error) as exc:
         return _failure("create_promotion", exc)
 
@@ -126,6 +139,7 @@ def _reorder_low_stock(
         updates: dict[str, Any] = {"last_action": "reorder_low_stock"}
         if data:
             updates["last_purchase_order_id"] = data[-1]["po_id"]
+            updates["last_purchase_order_supplier"] = data[-1]["supplier_name"]
         return _success(data, **updates)
     except (ValueError, TypeError, sqlite3.Error) as exc:
         return _failure("reorder_low_stock", exc)
@@ -139,6 +153,7 @@ def _receive_purchase_order(
         return _success(
             data,
             last_purchase_order_id=data["po_id"],
+            last_purchase_order_supplier=data["supplier_name"],
             last_skus=[data["sku"]],
             last_action="receive_purchase_order",
         )
@@ -166,6 +181,16 @@ def _get_stockout_risk(
         return _failure("get_stockout_risk", exc)
 
 
+def _query_store_metrics(
+    connection: sqlite3.Connection, **arguments: Any
+) -> ToolResult:
+    try:
+        data = analytics_query_store_metrics(connection, **arguments)
+        return _success(data, last_action="query_store_metrics")
+    except (ValueError, TypeError, sqlite3.Error) as exc:
+        return _failure("query_store_metrics", exc)
+
+
 def _query(connection: sqlite3.Connection, action: str, function: Callable[..., Any], **arguments: Any) -> ToolResult:
     try:
         return _success(function(connection, **arguments), last_action=action)
@@ -183,6 +208,14 @@ def _order_details(connection: sqlite3.Connection, **arguments: Any) -> ToolResu
 
 def _sales_report(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
     return _query(connection, "sales_report", sales_report, **arguments)
+
+
+def _customer_report(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "customer_report", customer_report, **arguments)
+
+
+def _order_report(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
+    return _query(connection, "order_report", order_report, **arguments)
 
 
 def _recommend_supplier(connection: sqlite3.Connection, **arguments: Any) -> ToolResult:
@@ -289,7 +322,11 @@ CREATE_PROMOTION = Tool(
     name="create_promotion",
     description=(
         "Create a product- or category-scoped percentage promotion with an "
-        "inclusive date window."
+        "inclusive date window. Product scope_ref values are P-TEE "
+        "(Classic Tee), P-HOOD (Pullover Hoodie), P-TOTE (Canvas Tote), "
+        "P-MUG (Ceramic Mug), or P-SOCK (Wool Socks). Category scope_ref "
+        "values are apparel or goods. Ask for missing dates or percent; do "
+        "not invent 0% or same-day promotions for underspecified requests."
     ),
     parameters={
         "type": "object",
@@ -410,6 +447,70 @@ GET_STOCKOUT_RISK = Tool(
     callable=_get_stockout_risk,
 )
 
+QUERY_STORE_METRICS = Tool(
+    name="query_store_metrics",
+    description=(
+        "Composable sales and store metrics query. Use this for flexible "
+        "questions about revenue, net revenue, spend, units, refunds, margin, "
+        "cost, orders, customers, products, SKUs, variants, categories, dates, "
+        "and payment methods."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "metrics": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string", "enum": sorted(SUPPORTED_METRICS)},
+            },
+            "group_by": {
+                "type": ["array", "null"],
+                "items": {"type": "string", "enum": sorted(SUPPORTED_DIMENSIONS)},
+            },
+            "filters": {
+                "type": ["object", "null"],
+                "properties": {
+                    name: {"type": ["string", "integer"]}
+                    for name in (
+                        "product_id",
+                        "product_name",
+                        "category",
+                        "sku",
+                        "color",
+                        "size",
+                        "customer_id",
+                        "customer_name",
+                        "customer_type",
+                        "payment_method",
+                        "order_id",
+                    )
+                },
+                "additionalProperties": False,
+            },
+            "date_range": {
+                "type": ["object", "null"],
+                "properties": {
+                    "start_date": DATE_SCHEMA,
+                    "end_date": DATE_SCHEMA,
+                },
+                "required": ["start_date", "end_date"],
+                "additionalProperties": False,
+            },
+            "sort_by": {"type": ["string", "null"]},
+            "sort_dir": {
+                "type": "string",
+                "enum": ["asc", "desc"],
+                "default": "desc",
+            },
+            "limit": {"type": ["integer", "null"], "minimum": 1},
+            "include_totals": {"type": "boolean", "default": False},
+        },
+        "required": ["metrics"],
+        "additionalProperties": False,
+    },
+    callable=_query_store_metrics,
+)
+
 INVENTORY_REPORT = Tool(
     name="inventory_report",
     description="Read inventory levels by product or SKU, including reorder points and days of cover. Never use a mutating tool for an inventory question.",
@@ -439,6 +540,54 @@ SALES_REPORT = Tool(
         "only_with_returns": {"type": "boolean", "default": False},
     }, "additionalProperties": False},
     callable=_sales_report,
+)
+
+CUSTOMER_REPORT = Tool(
+    name="customer_report",
+    description=(
+        "Read customers and customer revenue/order counts. Use this for all "
+        "customers, customer spend, and top customers by revenue. Set "
+        "start_date/end_date for period spend; include_walk_ins adds walk-in "
+        "as a pseudo-customer."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "start_date": {**DATE_SCHEMA, "default": "2026-05-01"},
+            "end_date": {**DATE_SCHEMA, "default": "2026-05-31"},
+            "customer_name": {"type": ["string", "null"]},
+            "include_walk_ins": {"type": "boolean", "default": False},
+            "sort_by_revenue": {"type": "boolean", "default": False},
+            "limit": {"type": ["integer", "null"], "minimum": 1},
+        },
+        "additionalProperties": False,
+    },
+    callable=_customer_report,
+)
+
+ORDER_REPORT = Tool(
+    name="order_report",
+    description=(
+        "Read orders with customer/walk-in status, payment method, discount, "
+        "and total paid. Use this for walk-in order counts, cash versus card "
+        "revenue, and sales with order-level discounts. For cash versus card "
+        "revenue, set group_by to payment_method so the tool returns the "
+        "aggregate totals."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "start_date": {**DATE_SCHEMA, "default": "2026-05-01"},
+            "end_date": {**DATE_SCHEMA, "default": "2026-05-31"},
+            "customer_name": {"type": ["string", "null"]},
+            "walk_in": {"type": ["boolean", "null"]},
+            "payment_method": {"type": ["string", "null"], "enum": ["cash", "card", None]},
+            "order_discount_only": {"type": "boolean", "default": False},
+            "group_by": {"type": "string", "enum": ["order", "payment_method"], "default": "order"},
+        },
+        "additionalProperties": False,
+    },
+    callable=_order_report,
 )
 
 RECOMMEND_SUPPLIER = Tool(
@@ -491,9 +640,12 @@ TOOLS = {
         RECEIVE_PURCHASE_ORDER,
         TOP_PRODUCTS_BY_PROFIT_MARGIN,
         GET_STOCKOUT_RISK,
+        QUERY_STORE_METRICS,
         INVENTORY_REPORT,
         ORDER_DETAILS,
         SALES_REPORT,
+        CUSTOMER_REPORT,
+        ORDER_REPORT,
         RECOMMEND_SUPPLIER,
         CANCEL_PURCHASE_ORDER,
         PRICE_QUOTE,

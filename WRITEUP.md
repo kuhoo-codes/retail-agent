@@ -7,6 +7,12 @@ services and analytics → structured tools → model-driven agent and terminal 
 interprets language and can execute multiple tools iteratively. Store calculations and state
 changes always run in Python services.
 
+Reads use both purpose-built reports and a composable `query_store_metrics` layer. The latter
+supports unanticipated combinations such as spend by customer, sales by variant, revenue by
+category, margin by product, and payment-method breakdowns. Its metrics, dimensions, filters,
+sorting, and date inputs are whitelisted; SQL fragments are application-owned and values are
+bound parameters.
+
 ## Domain model
 
 Products are separated from sellable SKU variants so apparel variants and single-SKU goods use
@@ -28,6 +34,7 @@ See [docs/DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) for details.
 | `receive_purchase_order` | Find/create a PO, receive inventory, update status. | product, supplier, ordered/received quantities; optional date and SKU variant |
 | `top_products_by_profit_margin` | Rank products by period margin. | optional `start_date`, `end_date`, `limit` |
 | `get_stockout_risk` | Report reorder and days-of-cover risks. | none |
+| `query_store_metrics` | Compose deterministic sales metrics over whitelisted dimensions and filters. | `metrics`; optional `group_by`, `filters`, `date_range`, sorting, limit, totals |
 | `inventory_report` | Show on-hand quantity, reorder point, and days of cover by SKU. | optional product or SKU |
 | `order_details` | Show customer, payment, lines, paid unit prices, and total. | `order_id` |
 | `sales_report` | Report units, revenue, returns, refunds, COGS, and margin. | optional period, product, grouping, and filters |
@@ -41,8 +48,9 @@ Full schemas and defaults are in [docs/TOOLS.md](docs/TOOLS.md).
 
 `RetailAgent` runs an iterative OpenAI-compatible tool-calling loop. Each tool result—including
 domain errors—is sent back to the model, which can clarify the request, call another tool, or
-produce the final response. Unknown tools are rejected by the agent. There is no regex intent
-router or offline natural-language fallback.
+produce the final response. Unknown tools are rejected by the agent. When no API key is present,
+a narrow deterministic fallback routes the published assignment workflows to existing tools and
+supported analytics phrasing to the composable tool. It does not permit arbitrary SQL.
 
 ## Session memory
 
@@ -69,7 +77,8 @@ network calls.
 ## Known limitations and assumptions
 
 - The assignment clock is fixed at 2026-06-19; “last month” means May 2026.
-- Natural-language operation requires a configured OpenAI-compatible model.
+- Full natural-language operation requires a configured OpenAI-compatible model; the offline
+  fallback intentionally covers the published workflows and common composable analytics reads.
 - Ambiguous product variants require clarification; the system does not guess a color or size.
 - Multi-variant purchase-order receiving requires an SKU or enough color/size information.
 - Session memory is in-process and is not persisted between program runs.

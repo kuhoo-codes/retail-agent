@@ -7,7 +7,9 @@ from pathlib import Path
 from retail_store.database import connect
 from retail_store.queries import (
     cancel_purchase_order,
+    customer_report,
     inventory_report,
+    order_report,
     order_details,
     recommend_supplier,
     sales_report,
@@ -48,6 +50,56 @@ class QueryCapabilityTests(unittest.TestCase):
         suppliers = recommend_supplier(self.connection, "Ceramic Mug")
         self.assertTrue(suppliers)
         self.assertIn("lead_time_days", suppliers[0])
+
+    def test_customer_and_order_reports_cover_common_questions(self) -> None:
+        customers = customer_report(self.connection)
+        self.assertEqual(
+            ["Marcus Reed", "Priya Patel", "Sarah Chen", "Tom Becker"],
+            [row["name"] for row in customers],
+        )
+
+        sarah = customer_report(
+            self.connection,
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            customer_name="Sarah Chen",
+        )
+        self.assertEqual("464.20", sarah[0]["total_spent"])
+
+        walk_ins = order_report(
+            self.connection,
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            walk_in=True,
+        )
+        self.assertEqual(5, len(walk_ins))
+
+        discounted = order_report(
+            self.connection,
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            order_discount_only=True,
+        )
+        self.assertEqual(["O-1006"], [row["order_id"] for row in discounted])
+
+        cash = order_report(
+            self.connection,
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            payment_method="cash",
+        )
+        self.assertEqual("328.00", f"{sum(float(row['total_paid']) for row in cash):.2f}")
+
+        payment_summary = order_report(
+            self.connection,
+            start_date="2026-05-01",
+            end_date="2026-05-31",
+            group_by="payment_method",
+        )
+        self.assertEqual(
+            {"card": "1458.20", "cash": "328.00"},
+            {row["payment_method"]: row["total_revenue"] for row in payment_summary},
+        )
 
     def test_cancel_open_purchase_order(self) -> None:
         po = reorder_low_stock(self.connection)[0]

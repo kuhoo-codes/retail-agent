@@ -57,7 +57,48 @@ class PromotionCreationTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(6_000, historical)
 
+    def test_product_name_promotion_scope_aliases_to_product_id(self) -> None:
+        promotion = create_promotion(
+            self.connection,
+            "Hoodie sale",
+            20,
+            "product",
+            "Pullover Hoodie",
+            "2026-06-20",
+            "2026-06-22",
+        )
+
+        self.assertEqual("product", promotion["scope_type"])
+        self.assertEqual("P-HOOD", promotion["scope_ref"])
+
+    def test_bare_tote_promotion_scope_aliases_to_product_id(self) -> None:
+        promotion = create_promotion(
+            self.connection,
+            "Tote sale",
+            15,
+            "product",
+            "tote",
+            "2026-06-19",
+            "2026-06-21",
+        )
+
+        self.assertEqual("product", promotion["scope_type"])
+        self.assertEqual("P-TOTE", promotion["scope_ref"])
+
+    def test_product_specific_description_overrides_broad_category_scope(self) -> None:
+        promotion = create_promotion(
+            self.connection,
+            "20% off all hoodies",
+            20,
+            "category",
+            "apparel",
+            "2026-06-20",
+            "2026-06-22",
+        )
+
+        self.assertEqual("product", promotion["scope_type"])
+        self.assertEqual("P-HOOD", promotion["scope_ref"])
+
 
 if __name__ == "__main__":
     unittest.main()
-

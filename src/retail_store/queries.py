@@ -9,6 +9,13 @@ from retail_store.services import get_effective_unit_price_cents
 from retail_store.analytics import top_products_by_profit_margin
 
 
+def _order_total_expression() -> str:
+    return (
+        "CAST(ROUND(SUM(ol.quantity * ol.unit_price_cents) * "
+        "(100 - o.order_discount_pct) / 100.0) AS INTEGER)"
+    )
+
+
 def inventory_report(
     connection: sqlite3.Connection,
     product_description: str | None = None,
@@ -106,6 +113,176 @@ def order_details(connection: sqlite3.Connection, order_id: str) -> dict[str, ob
             for row in lines
         ],
     }
+
+
+def customer_report(
+    connection: sqlite3.Connection,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    customer_name: str | None = None,
+    include_walk_ins: bool = False,
+    sort_by_revenue: bool = False,
+    limit: int | None = None,
+) -> list[dict[str, object]]:
+    """Read customers, optionally with order counts and revenue for a period."""
+    clauses: list[str] = []
+    parameters: list[object] = []
+    if customer_name:
+        clauses.append("lower(c.name) = lower(?)")
+        parameters.append(customer_name)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    customers = [
+        dict(row)
+        for row in connection.execute(
+            f"""SELECT c.customer_id, c.name, c.email, c.joined_date
+                FROM customers c
+                {where}
+                ORDER BY c.name""",
+            parameters,
+        )
+    ]
+    if customer_name and not customers:
+        raise ValueError(f"customer not found: {customer_name!r}")
+    if start_date is None and end_date is None:
+        return customers
+    if start_date is None or end_date is None:
+        raise ValueError("start_date and end_date must be provided together")
+
+    totals = {
+        row["customer_id"]: dict(row)
+        for row in connection.execute(
+            f"""SELECT c.customer_id, COUNT(*) order_count,
+                       SUM(order_total_cents) total_spent_cents
+                FROM (
+                    SELECT o.order_id, o.customer_id,
+                           {_order_total_expression()} AS order_total_cents
+                    FROM orders o
+                    JOIN order_lines ol ON ol.order_id=o.order_id
+                    WHERE o.order_date BETWEEN ? AND ?
+                    GROUP BY o.order_id
+                ) order_totals
+                JOIN customers c ON c.customer_id=order_totals.customer_id
+                GROUP BY c.customer_id""",
+            (start_date, end_date),
+        )
+    }
+    results = []
+    for customer in customers:
+        total = totals.get(customer["customer_id"], {})
+        results.append(
+            {
+                **customer,
+                "order_count": total.get("order_count", 0),
+                "total_spent": cents_to_usd(total.get("total_spent_cents", 0) or 0),
+            }
+        )
+    if include_walk_ins:
+        walk_in = connection.execute(
+            f"""SELECT COUNT(*) order_count, SUM(order_total_cents) total_spent_cents
+                FROM (
+                    SELECT o.order_id,
+                           {_order_total_expression()} AS order_total_cents
+                    FROM orders o
+                    JOIN order_lines ol ON ol.order_id=o.order_id
+                    WHERE o.customer_id IS NULL
+                      AND o.order_date BETWEEN ? AND ?
+                    GROUP BY o.order_id
+                ) order_totals""",
+            (start_date, end_date),
+        ).fetchone()
+        results.append(
+            {
+                "customer_id": None,
+                "name": "walk-in",
+                "email": None,
+                "joined_date": None,
+                "order_count": walk_in["order_count"] or 0,
+                "total_spent": cents_to_usd(walk_in["total_spent_cents"] or 0),
+            }
+        )
+    if sort_by_revenue:
+        results.sort(key=lambda row: float(row["total_spent"]), reverse=True)
+    if limit is not None:
+        results = results[:limit]
+    return results
+
+
+def order_report(
+    connection: sqlite3.Connection,
+    start_date: str = "2026-05-01",
+    end_date: str = "2026-05-31",
+    customer_name: str | None = None,
+    walk_in: bool | None = None,
+    payment_method: str | None = None,
+    order_discount_only: bool = False,
+    group_by: str = "order",
+) -> list[dict[str, object]]:
+    """Read orders with totals, customer, payment method, and discounts."""
+    clauses = ["o.order_date BETWEEN ? AND ?"]
+    parameters: list[object] = [start_date, end_date]
+    if customer_name:
+        clauses.append("lower(c.name) = lower(?)")
+        parameters.append(customer_name)
+    if walk_in is not None:
+        clauses.append("o.customer_id IS NULL" if walk_in else "o.customer_id IS NOT NULL")
+    if payment_method:
+        clauses.append("o.payment_method = ?")
+        parameters.append(payment_method)
+    if order_discount_only:
+        clauses.append("o.order_discount_pct > 0")
+    where = " AND ".join(clauses)
+    if group_by == "payment_method":
+        rows = connection.execute(
+            f"""SELECT payment_method, COUNT(*) order_count,
+                       SUM(total_paid_cents) total_revenue_cents
+                FROM (
+                    SELECT o.order_id, o.payment_method,
+                           {_order_total_expression()} AS total_paid_cents
+                    FROM orders o
+                    LEFT JOIN customers c ON c.customer_id=o.customer_id
+                    JOIN order_lines ol ON ol.order_id=o.order_id
+                    WHERE {where}
+                    GROUP BY o.order_id
+                ) order_totals
+                GROUP BY payment_method
+                ORDER BY payment_method""",
+            parameters,
+        ).fetchall()
+        return [
+            {
+                **dict(row),
+                "total_revenue": cents_to_usd(row["total_revenue_cents"]),
+            }
+            for row in rows
+        ]
+    if group_by != "order":
+        raise ValueError("group_by must be 'order' or 'payment_method'")
+    rows = connection.execute(
+        f"""SELECT o.order_id, o.order_date, COALESCE(c.name, 'walk-in') customer,
+                   o.payment_method, o.order_discount_pct,
+                   {_order_total_expression()} AS total_paid_cents
+            FROM orders o
+            LEFT JOIN customers c ON c.customer_id=o.customer_id
+            JOIN order_lines ol ON ol.order_id=o.order_id
+            WHERE {where}
+            GROUP BY o.order_id
+            ORDER BY o.order_date, o.order_id""",
+        parameters,
+    ).fetchall()
+    if customer_name and not rows:
+        known = connection.execute(
+            "SELECT 1 FROM customers WHERE lower(name) = lower(?)",
+            (customer_name,),
+        ).fetchone()
+        if known is None:
+            raise ValueError(f"customer not found: {customer_name!r}")
+    return [
+        {
+            **dict(row),
+            "total_paid": cents_to_usd(row["total_paid_cents"]),
+        }
+        for row in rows
+    ]
 
 
 def sales_report(

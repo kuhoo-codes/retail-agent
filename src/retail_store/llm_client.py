@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Mapping
@@ -14,6 +15,31 @@ class LLMClientError(RuntimeError):
 
 
 ToolInvoker = Callable[[str, dict[str, Any]], ToolResult]
+
+MUTATION_REQUEST_RE = re.compile(
+    r"\b("
+    r"ring up|sell|checkout|process a sale|create|put .* on|promotion|promo|"
+    r"return|refund|receive|reorder|restock|cancel|undo|change|delete|archive|"
+    r"add .* to|clear|reset|mark"
+    r")\b",
+    re.IGNORECASE,
+)
+MUTATION_SUCCESS_RE = re.compile(
+    r"\b(done|created|processed|completed|rang up|rung up|sold|received|"
+    r"reordered|restocked|updated|canceled|cancelled|deleted|changed)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_unbacked_mutation(user_text: str, answer: str) -> bool:
+    return bool(
+        MUTATION_REQUEST_RE.search(user_text)
+        and MUTATION_SUCCESS_RE.search(answer)
+        and "can't" not in answer.casefold()
+        and "cannot" not in answer.casefold()
+        and "couldn" not in answer.casefold()
+        and "need" not in answer.casefold()
+    )
 
 
 class OpenAICompatibleClient:
@@ -96,10 +122,22 @@ class OpenAICompatibleClient:
         system_prompt: str,
         recent_turns: list[dict[str, str]],
         invoke_tool: ToolInvoker,
+        session_context: dict[str, Any] | None = None,
     ) -> str:
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt}
         ]
+        if session_context:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Current structured session state for resolving references "
+                        'like "last", "same", and "that": '
+                        f"{json.dumps(session_context, sort_keys=True, default=str)}"
+                    ),
+                }
+            )
         messages.extend(
             {"role": turn["role"], "content": turn["content"]}
             for turn in recent_turns[-12:]
@@ -108,16 +146,39 @@ class OpenAICompatibleClient:
         )
         messages.append({"role": "user", "content": user_text})
 
+        saw_tool_call = False
+        unbacked_mutation_retry_used = False
         for _round in range(self.max_tool_rounds + 1):
             message = self._completion(messages, tools)
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
                 content = message.get("content")
                 if isinstance(content, str) and content.strip():
+                    if (
+                        not saw_tool_call
+                        and not unbacked_mutation_retry_used
+                        and _looks_like_unbacked_mutation(user_text, content)
+                    ):
+                        unbacked_mutation_retry_used = True
+                        messages.append(message)
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Your previous answer claimed a store mutation "
+                                    "succeeded without a tool result in this turn. "
+                                    "Call the appropriate tool now, or ask for missing "
+                                    "information. If no tool supports the mutation, "
+                                    "say it cannot be done."
+                                ),
+                            }
+                        )
+                        continue
                     return content.strip()
                 raise LLMClientError("LLM returned neither text nor a tool call")
 
             messages.append(message)
+            saw_tool_call = True
             for call in tool_calls:
                 try:
                     call_id = call["id"]
