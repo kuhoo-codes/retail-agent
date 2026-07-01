@@ -13,3 +13,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 retail_store = ["web_static/*"]
+
+[tool.vercel]
+entrypoint = "api.index:handler"
